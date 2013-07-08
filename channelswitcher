@@ -1,0 +1,95 @@
+#!/bin/bash 
+
+IP1='XXX.XXX.XXX.XXX'
+GW1='XXX.XXX.XXX.XXY'
+IP2='YYY.YYY.YYY.YYY'
+GW2='YYY.YYY.YYY.YYX'
+CH1_STATE='up'
+CH2_STATE='up'
+CUR_CH='1'
+CHECKIP1='4.2.2.2'
+CHECKIP2='8.8.4.4'
+CH_NAME1='Planeta'
+CH_NAME2='Insis'
+#DEV1='eth1'
+#DEV2='eth2'
+
+DATE="\e[00;34m$(date '+%d_%h_%Y %H:%M:%S')\e[00m"
+DEAD="\e[00;31mDEAD\e[00m"
+ALIVE="\e[00;32mALIVE\e[00m"
+ARISED="\e[00;33marised\e[00m"
+ENABLED="\e[00;33mset as default channel\e[00m"
+
+function asterisk_restart(){
+    sleep 2
+    service asterisk restart
+    sleep 10
+    service asterisk restart
+    echo -e "$DATE \e[00;33mAsterisk restarted\e[00m"
+}
+
+while true ; do
+
+#add persistent routes for check IPs via diferent channels
+
+[[ $(ip route show $CHECKIP1 | wc -l ) -eq 0 ]] && {
+    ip route add $CHECKIP1 via $GW1 &> /dev/null
+}
+
+[[ $(ip route show $CHECKIP2 | wc -l ) -eq 0 ]] && {
+    ip route add $CHECKIP2 via $GW2 &> /dev/null
+}
+
+#check provider 1 state
+
+    ping -c2 -i3 $CHECKIP1 &> /dev/null
+    if [[ $? -ne 0 ]]; then
+        CH1_STATE='down'
+        echo -e "$DATE $CH_NAME1 IS $DEAD"
+    else
+        CH1_STATE='up'
+        echo -e "$DATE $CH_NAME1 IS $ALIVE"
+    fi
+
+#check provider 2 state
+
+    ping -c2 -i3 $CHECKIP2 &> /dev/null
+    if [[ $? -ne 0 ]]; then
+         CH2_STATE='down'
+         echo -e "$DATE $CH_NAME2 IS $DEAD"
+    else
+         CH2_STATE='up'
+         echo -e "$DATE $CH_NAME2 IS $ALIVE"
+    fi
+
+# switch channel if needed due to previous tests
+
+    if [[ $CH1_STATE == 'down' && $CH2_STATE == 'up' ]]; then
+        [[ $CUR_CH -ne 2  ]] && {
+            ip route replace default via $GW2
+            CUR_CH='2'
+            echo -e "$DATE $CH_NAME1 was found dead, $CH_NAME2 $ARISED"
+            asterisk_restart
+        }
+    fi
+
+    if [[ $CH2_STATE == 'down' && $CH1_STATE == 'up' ]]; then
+        [[ $CUR_CH -ne 1  ]] && {
+            ip route replace default via $GW1
+            CUR_CH='1'
+            echo -e "$DATE $CH_NAME2 was found dead, $CH_NAME1 $ARISED"
+            asterisk_restart
+        }
+    fi
+
+    if [[ $CH1_STATE == 'up' && $CUR_CH -ne 1 ]]; then
+        ip route replace default via $GW1
+        CUR_CH='1'
+        echo -e "$DATE $CH_NAME1 is $ALIVE again and $ENABLED"
+        asterisk_restart
+    fi
+
+    sleep 1
+    echo
+
+done
